@@ -293,7 +293,10 @@ resource "aws_instance" "vulnerable_ai_server" {
     volume_type = "gp3"
   }
 
-  # No user_data - EC2 configuration will be done via GitHub Actions
+  # User data configures EC2 instance with Ollama and dependencies
+  user_data = templatefile("${path.module}/user_data.sh", {
+    s3_bucket_name = aws_s3_bucket.sensitive_data.id
+  })
 
   tags = {
     Name        = "vulnerable-ai-server"

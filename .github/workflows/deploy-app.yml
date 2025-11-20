@@ -1,0 +1,63 @@
+name: Deploy Application to EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      ec2_public_ip:
+        description: 'EC2 Public IP (from Terraform output)'
+        required: true
+      s3_bucket_name:
+        description: 'S3 Bucket Name (from Terraform output)'
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update server.js with S3 bucket name
+        run: |
+          sed -i "s/REPLACE_WITH_S3_BUCKET/${{ github.event.inputs.s3_bucket_name }}/g" app/server.js
+
+      - name: Deploy application files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ github.event.inputs.ec2_public_ip }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "app/server.js,app/index.html"
+          target: "/tmp/"
+          strip_components: 1
+
+      - name: Install and restart application
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ github.event.inputs.ec2_public_ip }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Move files to application directory
+            sudo cp /tmp/server.js /tmp/index.html /var/www/vulnerable-ai-app/
+
+            # Restart application service
+            sudo systemctl restart vulnerable-ai-app
+
+            # Wait a moment for service to start
+            sleep 3
+
+            # Check application status
+            sudo systemctl status vulnerable-ai-app --no-pager
+
+            echo "Application deployed successfully!"
+
+      - name: Output deployment info
+        run: |
+          echo "## Application Deployed! 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Web Application URL:** http://${{ github.event.inputs.ec2_public_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The vulnerable AI application is now live and ready for security training." >> $GITHUB_STEP_SUMMARY

@@ -161,156 +161,50 @@ Environment="OLLAMA_HOST=0.0.0.0:11434"
 
 ## Deployment Instructions
 
-This project supports **two deployment methods**:
+This project uses a **two-step deployment process**:
 
-### Method 1: GitHub Actions (Recommended)
+1. **Terraform** - Deploys all AWS infrastructure (VPC, EC2, S3, IAM) and configures the EC2 instance
+2. **GitHub Actions** - Deploys the web application to the configured EC2 instance
 
-GitHub Actions automates the entire deployment process including EC2 configuration.
+### Quick Start
 
-**Prerequisites:**
-- GitHub repository containing this code
-- AWS account with OIDC configured
-- SSH key pair for EC2 access
+**Step 1: Deploy Infrastructure with Terraform**
 
-**Steps:**
-1. Follow the complete setup guide: **[GITHUB_ACTIONS_SETUP.md](GITHUB_ACTIONS_SETUP.md)**
-2. Configure GitHub Secrets (AWS role, SSH keys)
-3. Run workflow from GitHub Actions tab
-4. Wait 15-20 minutes for complete deployment
-5. Access application at the URL shown in workflow summary
-
-**Advantages:**
-- Fully automated deployment
-- No local Terraform required
-- Automated EC2 configuration and software installation
-- Easy teardown via workflow
-
-### Method 2: Manual Terraform Deployment
-
-For local deployment without GitHub Actions.
-
-**Prerequisites:**
-- AWS account with appropriate permissions
-- Terraform installed (>= 1.0)
-- SSH key pair generated
-
-**Steps:**
-
-1. **Clone and configure:**
 ```bash
-cd aws-ai-project/terraform
+cd terraform
 cp terraform.tfvars.example terraform.tfvars
-```
-
-2. **Edit terraform.tfvars:**
-```hcl
-aws_region     = "us-east-1"
-project_name   = "vulnerable-ai-demo"
-instance_type  = "t3.xlarge"
-ssh_public_key = "ssh-rsa AAAAB3... your-key-here"
-```
-
-3. **Initialize Terraform:**
-```bash
+# Edit terraform.tfvars with your settings
 terraform init
-```
-
-4. **Review the plan:**
-```bash
-terraform plan
-```
-
-5. **Deploy infrastructure:**
-```bash
 terraform apply
 ```
 
-6. **Manually configure EC2 instance:**
+Wait 15-20 minutes for complete infrastructure setup (includes Ollama + Llama 3.2 download).
 
-After Terraform creates the infrastructure, you must manually SSH to the instance and run the setup commands:
+**Step 2: Deploy Application**
 
+**Option A - GitHub Actions (Recommended):**
+1. Go to Actions → "Deploy Application to EC2"
+2. Run workflow with Terraform outputs (EC2 IP, S3 bucket name)
+
+**Option B - Manual:**
 ```bash
-# SSH to instance
-ssh -i ~/.ssh/your-private-key ubuntu@<EC2_PUBLIC_IP>
-
-# Update system
-sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
-
-# Install dependencies
-sudo apt-get install -y curl wget git nodejs npm python3 python3-pip jq awscli
-sudo pip3 install yt-dlp youtube-transcript-api
-
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Configure Ollama to listen on all interfaces (INSECURE)
-sudo mkdir -p /etc/systemd/system/ollama.service.d
-echo '[Service]' | sudo tee /etc/systemd/system/ollama.service.d/override.conf
-echo 'Environment="OLLAMA_HOST=0.0.0.0:11434"' | sudo tee -a /etc/systemd/system/ollama.service.d/override.conf
-
-# Restart Ollama
-sudo systemctl daemon-reload
-sudo systemctl restart ollama
-sudo systemctl enable ollama
-
-# Pull Llama 3.2 model (takes 5-10 minutes)
-ollama pull llama3.2
+cd app
+scp -i ~/.ssh/your-key server.js index.html ubuntu@<EC2_IP>:/tmp/
+ssh -i ~/.ssh/your-key ubuntu@<EC2_IP>
+sudo cp /tmp/*.{js,html} /var/www/vulnerable-ai-app/
+sudo systemctl restart vulnerable-ai-app
 ```
 
-7. **Deploy application files:**
+### Detailed Instructions
 
-Copy the `app/` directory contents to the EC2 instance:
+See the complete deployment guide: **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)**
 
-```bash
-# From your local machine
-scp -i ~/.ssh/your-private-key app/* ubuntu@<EC2_PUBLIC_IP>:/tmp/
-
-# SSH back to instance
-ssh -i ~/.ssh/your-private-key ubuntu@<EC2_PUBLIC_IP>
-
-# Create application directory
-sudo mkdir -p /var/www/vulnerable-ai-app
-sudo cp /tmp/server.js /tmp/index.html /var/www/vulnerable-ai-app/
-
-# Update S3 bucket name in server.js
-S3_BUCKET=$(aws s3 ls | grep vulnerable-ai-demo-sensitive-data | awk '{print $3}')
-sudo sed -i "s/REPLACE_WITH_S3_BUCKET/$S3_BUCKET/g" /var/www/vulnerable-ai-app/server.js
-
-# Create systemd service
-sudo tee /etc/systemd/system/vulnerable-ai-app.service > /dev/null <<EOF
-[Unit]
-Description=Vulnerable AI Application (Security Training)
-After=network.target ollama.service
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/var/www/vulnerable-ai-app
-ExecStart=/usr/bin/node /var/www/vulnerable-ai-app/server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Start application
-sudo systemctl daemon-reload
-sudo systemctl enable vulnerable-ai-app
-sudo systemctl start vulnerable-ai-app
-```
-
-8. **Access the application:**
-```
-http://<EC2_PUBLIC_IP>
-```
-
-9. **Check application status:**
-```bash
-sudo systemctl status vulnerable-ai-app
-sudo journalctl -u vulnerable-ai-app -n 50
-```
+Includes:
+- Step-by-step Terraform deployment
+- GitHub Actions setup
+- Manual deployment alternative
+- Troubleshooting guide
+- Cost management tips
 
 ## Training Exercises
 
