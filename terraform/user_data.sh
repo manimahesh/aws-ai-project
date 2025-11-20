@@ -29,8 +29,17 @@ systemctl enable ollama
 # Wait for Ollama to start
 sleep 10
 
-# Pull Llama 3.2 model in the background
-nohup ollama pull llama3.2 > /var/log/ollama-pull.log 2>&1 &
+# Pull Llama 3.2 model (this takes 5-10 minutes)
+# Using nohup and background to not block user_data, but with better error handling
+(
+  echo "Starting Llama 3.2 model download at $(date)" > /var/log/ollama-pull.log
+  ollama pull llama3.2 >> /var/log/ollama-pull.log 2>&1
+  if [ $? -eq 0 ]; then
+    echo "Model download completed successfully at $(date)" >> /var/log/ollama-pull.log
+  else
+    echo "Model download FAILED at $(date)" >> /var/log/ollama-pull.log
+  fi
+) &
 
 # Create application directory
 mkdir -p /var/www/vulnerable-ai-app

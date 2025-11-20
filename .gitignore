@@ -27,3 +27,4 @@ id_rsa*
 # Environment files
 .env
 .env.local
+troubleshoot-app.sh

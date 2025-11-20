@@ -10,7 +10,7 @@ const S3_BUCKET = 'REPLACE_WITH_S3_BUCKET';
 // VULNERABILITY: No input validation or sanitization
 function processYouTubeUrl(url, callback) {
   // VULNERABILITY: Command injection possible through URL
-  const command = `yt-dlp --skip-download --write-auto-sub --sub-lang en --sub-format json3 --output "subtitle" "${url}" 2>&1 || yt-dlp --skip-download --print description "${url}"`;
+  const command = `yt-dlp --extractor-args "youtube:player_client=default" --skip-download --write-auto-sub --sub-lang en --sub-format json3 --output "subtitle" "${url}" 2>&1 || yt-dlp --extractor-args "youtube:player_client=default" --skip-download --print description "${url}"`;
 
   exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
     if (error && !stdout) {
