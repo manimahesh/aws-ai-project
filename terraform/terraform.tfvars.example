@@ -1,0 +1,9 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your values
+
+aws_region     = "us-east-1"
+project_name   = "vulnerable-ai-demo"
+instance_type  = "t3.xlarge"  # Minimum recommended for Llama 3.2
+
+# Add your SSH public key here (contents of ~/.ssh/id_rsa.pub or similar)
+ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ... your-email@example.com"
