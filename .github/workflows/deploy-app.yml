@@ -24,7 +24,7 @@ jobs:
           sed -i "s/REPLACE_WITH_S3_BUCKET/${{ github.event.inputs.s3_bucket_name }}/g" app/server.js
 
       - name: Deploy application files to EC2
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1
         with:
           host: ${{ github.event.inputs.ec2_public_ip }}
           username: ubuntu
