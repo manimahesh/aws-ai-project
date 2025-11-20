@@ -29,7 +29,6 @@ jobs:
           host: ${{ github.event.inputs.ec2_public_ip }}
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
           source: "app/server.js,app/index.html"
           target: "/tmp/"
           strip_components: 1
