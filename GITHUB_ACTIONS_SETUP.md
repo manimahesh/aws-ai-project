@@ -1,325 +1,393 @@
 # GitHub Actions Setup Guide
 
-This guide explains how to deploy the vulnerable AI infrastructure using GitHub Actions instead of manual Terraform commands.
+This guide explains how to configure GitHub Actions to deploy the application to your EC2 instance.
 
 ## Prerequisites
 
-1. AWS Account with appropriate permissions
+1. Infrastructure already deployed via Terraform
 2. GitHub repository containing this code
-3. SSH key pair for EC2 access
+3. SSH key pair (same one used in Terraform)
 
 ## Setup Steps
 
-### 1. Configure AWS Authentication (OIDC Recommended)
+### 1. Locate Your SSH Keys
 
-GitHub Actions uses OpenID Connect (OIDC) to authenticate with AWS without storing long-lived credentials.
+You should have generated SSH keys for Terraform deployment. Locate them:
 
-#### Create IAM OIDC Provider
-
+**Linux/Mac:**
 ```bash
-# In AWS Console or via CLI
-aws iam create-open-id-connect-provider \
-  --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com \
-  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
+ls -la ~/.ssh/vulnerable-ai-demo*
+# Should show:
+# ~/.ssh/vulnerable-ai-demo (private key)
+# ~/.ssh/vulnerable-ai-demo.pub (public key)
 ```
 
-#### Create IAM Role for GitHub Actions
-
-```bash
-# Create trust policy file
-cat > github-actions-trust-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Federated": "arn:aws:iam::YOUR_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
-      },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:YOUR_GITHUB_USERNAME/YOUR_REPO_NAME:*"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-# Create the role
-aws iam create-role \
-  --role-name GitHubActionsVulnerableAIRole \
-  --assume-role-policy-document file://github-actions-trust-policy.json
-
-# Attach necessary permissions
-aws iam attach-role-policy \
-  --role-name GitHubActionsVulnerableAIRole \
-  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+**Windows:**
+```powershell
+dir $env:USERPROFILE\.ssh\vulnerable-ai-demo*
+# Should show:
+# vulnerable-ai-demo (private key)
+# vulnerable-ai-demo.pub (public key)
 ```
 
-**Note:** For production, use more restrictive permissions. This demo uses AdministratorAccess for simplicity.
+### 2. Verify SSH Keys Work
 
-### 2. Generate SSH Key Pair
+Test that you can SSH to your EC2 instance:
 
 ```bash
-# Generate new SSH key pair
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/vulnerable-ai-demo -C "vulnerable-ai-demo"
+# Get EC2 IP from Terraform
+cd terraform
+terraform output ec2_public_ip
 
-# Display public key (for GitHub Secret)
+# Test SSH connection
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_PUBLIC_IP>
+```
+
+If this works, your keys are valid. If not, fix this first before setting up GitHub Actions.
+
+### 3. Prepare SSH Private Key for GitHub Secret
+
+The private key must be in the **correct format** for GitHub Actions.
+
+**Display your private key:**
+
+```bash
+# Linux/Mac
+cat ~/.ssh/vulnerable-ai-demo
+
+# Windows PowerShell
+Get-Content $env:USERPROFILE\.ssh\vulnerable-ai-demo -Raw
+```
+
+**Expected format (OpenSSH):**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAACFwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAgEA7xQvB... (many lines)
+...
+-----END OPENSSH PRIVATE KEY-----
+```
+
+**Alternative format (RSA - also valid):**
+```
+-----BEGIN RSA PRIVATE KEY-----
+MIIJKQIBAAKCAgEA7xQvB... (many lines)
+...
+-----END RSA PRIVATE KEY-----
+```
+
+**⚠️ IMPORTANT:**
+- Include the BEGIN and END lines
+- Copy the **entire** key including all lines
+- Preserve line breaks exactly as shown
+- Do not add extra spaces or formatting
+
+### 4. Configure GitHub Secrets
+
+#### Step 4.1: Navigate to Secrets
+
+1. Go to your GitHub repository
+2. Click **Settings** (repository settings, not account)
+3. In left sidebar, click **Secrets and variables** → **Actions**
+4. Click **New repository secret**
+
+#### Step 4.2: Add SSH_PRIVATE_KEY Secret
+
+**Name:** `SSH_PRIVATE_KEY`
+
+**Value:**
+- Paste your **entire private key** from step 3
+- Include the `-----BEGIN` and `-----END` lines
+- Ensure all line breaks are preserved
+
+**Example of what to paste:**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAACFwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAgEA7xQvB5aN8K...
+... (many more lines) ...
+AAAADnZ1bG5lcmFibGUtYWktZGVtbw==
+-----END OPENSSH PRIVATE KEY-----
+```
+
+Click **Add secret**.
+
+### 5. Verify Secret Format
+
+Common issues and how to verify:
+
+#### Issue 1: Extra Spaces or Line Breaks
+
+**Wrong:**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+
+b3BlbnNzaC1rZXktdjEAAAAA...
+```
+*(Extra blank line after BEGIN)*
+
+**Correct:**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAA...
+```
+
+#### Issue 2: Missing Headers
+
+**Wrong:**
+```
+b3BlbnNzaC1rZXktdjEAAAAA...
+... (key content) ...
+```
+*(Missing BEGIN/END lines)*
+
+**Correct:**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAA...
+-----END OPENSSH PRIVATE KEY-----
+```
+
+#### Issue 3: Using Public Key Instead
+
+**Wrong:** Using contents of `vulnerable-ai-demo.pub`
+```
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC...
+```
+
+**Correct:** Using contents of `vulnerable-ai-demo` (no .pub extension)
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+...
+-----END OPENSSH PRIVATE KEY-----
+```
+
+### 6. Test the Deployment
+
+#### Step 6.1: Get Terraform Outputs
+
+```bash
+cd terraform
+terraform output ec2_public_ip
+terraform output s3_bucket_name
+```
+
+Save these values.
+
+#### Step 6.2: Run GitHub Actions Workflow
+
+1. Go to your GitHub repository
+2. Click **Actions** tab
+3. Select **Deploy Application to EC2** workflow
+4. Click **Run workflow** button
+5. Fill in the inputs:
+   - **ec2_public_ip:** Paste the IP from Terraform output
+   - **s3_bucket_name:** Paste the bucket name from Terraform output
+6. Click **Run workflow**
+
+#### Step 6.3: Monitor the Workflow
+
+Watch the workflow run:
+- "Checkout code" - Should succeed
+- "Update server.js with S3 bucket name" - Should succeed
+- "Deploy application files to EC2" - This is where SSH auth happens
+- "Install and restart application" - Runs after successful deployment
+
+### 7. Troubleshooting
+
+#### Error: "ssh: handshake failed: ssh: unable to authenticate"
+
+**Cause:** SSH key mismatch or formatting issue
+
+**Solutions:**
+
+**A. Verify the keys match:**
+```bash
+# Get the public key fingerprint from your local key
+ssh-keygen -lf ~/.ssh/vulnerable-ai-demo.pub
+
+# Get the fingerprint from AWS
+aws ec2 describe-key-pairs --key-names vulnerable-ai-demo-deployer-key --query 'KeyPairs[0].KeyFingerprint'
+
+# These should match!
+```
+
+**B. Regenerate and re-import the secret:**
+```bash
+# Display private key
+cat ~/.ssh/vulnerable-ai-demo
+
+# Copy the ENTIRE output (including BEGIN/END lines)
+# Delete old SSH_PRIVATE_KEY secret in GitHub
+# Create new secret with fresh copy
+```
+
+**C. Verify EC2 instance has the correct authorized_keys:**
+```bash
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_IP>
+cat ~/.ssh/authorized_keys
+# Should contain the public key matching your private key
+```
+
+**D. Test SSH locally first:**
+```bash
+# This must work before GitHub Actions will work
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_IP> echo "Success"
+```
+
+#### Error: "Permission denied (publickey)"
+
+**Cause:** Wrong username or key not authorized
+
+**Solutions:**
+
+**Check username:**
+- For Ubuntu AMI, username is `ubuntu`
+- Workflow uses `ubuntu` - this should be correct
+
+**Check key is authorized on EC2:**
+```bash
+# SSH to instance
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_IP>
+
+# Check authorized keys
+cat ~/.ssh/authorized_keys
+
+# Should contain your public key
+```
+
+#### Error: "Host key verification failed"
+
+**Solution:** This is rare but can happen if you've destroyed and recreated the instance.
+
+Update the workflow to disable strict host key checking (only for training environments):
+
+```yaml
+- name: Deploy application files to EC2
+  uses: appleboy/scp-action@v1
+  with:
+    host: ${{ github.event.inputs.ec2_public_ip }}
+    username: ubuntu
+    key: ${{ secrets.SSH_PRIVATE_KEY }}
+    source: "app/server.js,app/index.html"
+    target: "/tmp/"
+    strip_components: 1
+    ssh_option: "-o StrictHostKeyChecking=no"  # Add this line
+```
+
+### 8. Alternative: Test SSH Key Format
+
+Create a test script to verify your key format:
+
+```bash
+# Save your private key to a test file
+cat ~/.ssh/vulnerable-ai-demo > /tmp/test-key
+
+# Set correct permissions
+chmod 600 /tmp/test-key
+
+# Test SSH
+ssh -i /tmp/test-key ubuntu@<EC2_IP> echo "Success"
+
+# If this works, copy the EXACT contents to GitHub Secret
+cat /tmp/test-key
+
+# Clean up
+rm /tmp/test-key
+```
+
+### 9. Key Generation Best Practices
+
+If you need to regenerate keys:
+
+```bash
+# Generate new key pair
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/vulnerable-ai-demo -N ""
+
+# Display public key (for terraform.tfvars)
 cat ~/.ssh/vulnerable-ai-demo.pub
 
 # Display private key (for GitHub Secret)
 cat ~/.ssh/vulnerable-ai-demo
+
+# Destroy and recreate infrastructure with new key
+cd terraform
+terraform destroy
+# Update terraform.tfvars with new public key
+terraform apply
+
+# Update GitHub Secret with new private key
 ```
 
-### 3. Configure GitHub Secrets
+### 10. Security Best Practices
 
-Go to your GitHub repository → Settings → Secrets and variables → Actions
+**DO:**
+- ✅ Use separate SSH keys for each project
+- ✅ Never commit private keys to git
+- ✅ Use GitHub Secrets for sensitive data
+- ✅ Rotate keys regularly
+- ✅ Delete keys when project is complete
 
-Create the following secrets:
+**DON'T:**
+- ❌ Share private keys
+- ❌ Use the same key across multiple projects
+- ❌ Store keys in plaintext files
+- ❌ Commit keys to version control
+- ❌ Use production keys in training environments
 
-| Secret Name | Value | Description |
-|------------|-------|-------------|
-| `AWS_ROLE_ARN` | `arn:aws:iam::YOUR_ACCOUNT_ID:role/GitHubActionsVulnerableAIRole` | ARN of the IAM role created above |
-| `SSH_PUBLIC_KEY` | Contents of `~/.ssh/vulnerable-ai-demo.pub` | Public SSH key for EC2 access |
-| `SSH_PRIVATE_KEY` | Contents of `~/.ssh/vulnerable-ai-demo` | Private SSH key for GitHub Actions to configure EC2 |
+## Manual Deployment Alternative
 
-#### How to Add Secrets:
-
-1. Navigate to: `https://github.com/YOUR_USERNAME/YOUR_REPO/settings/secrets/actions`
-2. Click "New repository secret"
-3. Enter secret name and value
-4. Click "Add secret"
-
-### 4. Verify Workflow File
-
-Ensure [`.github/workflows/deploy-vulnerable-ai.yml`](.github/workflows/deploy-vulnerable-ai.yml) exists in your repository.
-
-### 5. Deploy Infrastructure
-
-#### Via GitHub UI:
-
-1. Go to the "Actions" tab in your GitHub repository
-2. Select "Deploy Vulnerable AI Infrastructure" workflow
-3. Click "Run workflow" button
-4. Select:
-   - **Action**: `apply` (to create infrastructure)
-   - **AWS Region**: `us-east-1` (or your preferred region)
-5. Click "Run workflow"
-
-#### Via GitHub CLI:
+If GitHub Actions continues to have issues, deploy manually:
 
 ```bash
-# Install GitHub CLI if not already installed
-# https://cli.github.com/
+# Update server.js
+cd app
+sed -i "s/REPLACE_WITH_S3_BUCKET/<your-bucket-name>/g" server.js
 
-# Trigger deployment
-gh workflow run deploy-vulnerable-ai.yml \
-  -f action=apply \
-  -f aws_region=us-east-1
+# Copy to EC2
+scp -i ~/.ssh/vulnerable-ai-demo server.js index.html ubuntu@<EC2_IP>:/tmp/
+
+# SSH and install
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_IP>
+sudo cp /tmp/server.js /tmp/index.html /var/www/vulnerable-ai-app/
+sudo systemctl restart vulnerable-ai-app
+sudo systemctl status vulnerable-ai-app
+exit
+
+# Test
+curl http://<EC2_IP>
 ```
 
-### 6. Monitor Deployment
-
-1. Go to Actions tab
-2. Click on the running workflow
-3. Watch the progress in real-time
-4. Deployment takes approximately 15-20 minutes total:
-   - Terraform apply: ~2-3 minutes
-   - EC2 instance startup: ~1 minute
-   - Software installation: ~5-8 minutes
-   - Ollama model download: ~5-10 minutes
-
-### 7. Access Deployed Application
-
-After successful deployment, check the workflow summary for:
-
-- **Web Application URL**: `http://EC2_PUBLIC_IP`
-- **Ollama API URL**: `http://EC2_PUBLIC_IP:11434`
-- **SSH Command**: `ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@EC2_PUBLIC_IP`
-
-### 8. Destroy Infrastructure
-
-When finished with training:
-
-1. Go to Actions → Deploy Vulnerable AI Infrastructure
-2. Click "Run workflow"
-3. Select:
-   - **Action**: `destroy`
-   - **AWS Region**: Same region used for deployment
-4. Click "Run workflow"
-
-This will tear down all resources to avoid ongoing costs.
-
-## Troubleshooting
-
-### Workflow Fails at "Configure AWS credentials"
-
-**Error:** `Error: Could not assume role with OIDC`
-
-**Solution:**
-- Verify `AWS_ROLE_ARN` secret is correct
-- Ensure IAM role trust policy includes your repository
-- Check OIDC provider is created in AWS account
-
-### Workflow Fails at "Configure EC2 Instance"
-
-**Error:** `Permission denied (publickey)`
-
-**Solution:**
-- Verify `SSH_PRIVATE_KEY` secret contains complete private key (including headers)
-- Ensure private key format is correct (no extra spaces/newlines)
-- Check that `SSH_PUBLIC_KEY` was used by Terraform to create the key pair
-
-### Workflow Succeeds but Application Doesn't Respond
-
-**Possible Causes:**
-1. **Ollama model still downloading**: Wait 5-10 more minutes
-2. **Application not started**: SSH to instance and check logs:
-   ```bash
-   ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@EC2_PUBLIC_IP
-   sudo systemctl status vulnerable-ai-app
-   sudo journalctl -u vulnerable-ai-app -n 50
-   ```
-3. **Security group issue**: Verify port 80 is open in AWS Console
-
-### Check Application Status
-
-SSH to the instance and run:
+## Quick Reference
 
 ```bash
-ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@EC2_PUBLIC_IP
-sudo /root/check-status.sh
+# Generate SSH key
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/vulnerable-ai-demo
+
+# Display public key (for Terraform)
+cat ~/.ssh/vulnerable-ai-demo.pub
+
+# Display private key (for GitHub Secret)
+cat ~/.ssh/vulnerable-ai-demo
+
+# Test SSH connection
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<EC2_IP>
+
+# Get Terraform outputs
+cd terraform
+terraform output
+
+# Manual deployment
+cd ../app
+scp -i ~/.ssh/vulnerable-ai-demo *.{js,html} ubuntu@<IP>:/tmp/
+ssh -i ~/.ssh/vulnerable-ai-demo ubuntu@<IP> "sudo cp /tmp/*.{js,html} /var/www/vulnerable-ai-app/ && sudo systemctl restart vulnerable-ai-app"
 ```
-
-This displays:
-- Ollama service status
-- Installed models
-- Web application status
-- Open ports
-- Recent application logs
-
-## Workflow Details
-
-### What the Workflow Does:
-
-1. **Terraform Init/Plan/Apply**: Creates AWS infrastructure
-   - VPC, subnet, security groups
-   - EC2 instance
-   - S3 bucket with sensitive data
-   - IAM roles and policies
-
-2. **Wait for EC2**: Waits for instance to be running
-
-3. **Configure EC2 via SSH**:
-   - Updates system packages
-   - Installs Node.js, Python, AWS CLI
-   - Installs yt-dlp for YouTube processing
-   - Installs Ollama
-   - Configures Ollama to listen on all interfaces (INSECURE - intentional)
-   - Downloads Llama 3.2 model
-
-4. **Deploy Application via SCP**:
-   - Copies `app/server.js` and `app/index.html` to EC2
-   - Creates systemd service
-   - Starts the vulnerable web application
-
-5. **Output Information**: Displays access URLs and warnings
-
-### Workflow Inputs:
-
-- **action**: `apply` (deploy) or `destroy` (tear down)
-- **aws_region**: AWS region for deployment (default: `us-east-1`)
-
-### Environment Variables:
-
-- `TF_VERSION`: Terraform version (currently `1.6.0`)
-- `AWS_REGION`: Deployment region
-
-## Security Considerations
-
-### GitHub Secrets Security:
-
-- **Never commit secrets to repository**
-- **Use OIDC instead of access keys** when possible
-- **Rotate SSH keys regularly**
-- **Limit IAM role permissions** to minimum required
-
-### Workflow Security:
-
-- Uses `permissions: id-token: write` for OIDC
-- Secrets are masked in logs
-- SSH keys are never exposed in outputs
-
-### AWS Security:
-
-- This infrastructure is **INTENTIONALLY INSECURE**
-- Only deploy in isolated training accounts
-- Destroy immediately after training
-- Monitor costs in AWS Billing Dashboard
-
-## Advanced Usage
-
-### Custom Terraform Variables
-
-Modify the workflow to accept additional inputs:
-
-```yaml
-inputs:
-  instance_type:
-    description: 'EC2 instance type'
-    required: false
-    default: 't3.xlarge'
-```
-
-Then update the `Create terraform.tfvars` step to use the input.
-
-### Multiple Environments
-
-Create separate workflows for dev/staging/prod or use workflow inputs to specify environment.
-
-### Notifications
-
-Add Slack/Discord/Email notifications on deployment success/failure:
-
-```yaml
-- name: Notify on Success
-  if: success()
-  run: |
-    curl -X POST ${{ secrets.SLACK_WEBHOOK }} \
-      -d '{"text":"Vulnerable AI infrastructure deployed successfully!"}'
-```
-
-## Cost Optimization
-
-- **Stop EC2 when not in use**: Manually stop instance in AWS Console
-- **Use Spot Instances**: Modify Terraform to use spot pricing
-- **Auto-shutdown**: Add cron job to stop instance after hours
-- **Set billing alerts**: Configure AWS Budgets to alert on spending
 
 ## Next Steps
 
-1. Review [README.md](README.md) for vulnerability details
-2. Study [ATTACK_SCENARIOS.md](ATTACK_SCENARIOS.md) for exploitation techniques
-3. Reference [SECURE_VERSION.md](SECURE_VERSION.md) for proper implementations
-4. Practice attacks in the deployed environment
-5. Document findings and lessons learned
-6. **Destroy infrastructure** when complete
-
-## Support
-
-For issues with:
-- **GitHub Actions**: Check workflow logs and this guide
-- **AWS Resources**: Review Terraform output and AWS Console
-- **Application**: SSH to instance and check logs
-
-## References
-
-- [GitHub Actions OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
-- [Terraform with GitHub Actions](https://developer.hashicorp.com/terraform/tutorials/automation/github-actions)
-- [AWS IAM OIDC](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+Once deployment succeeds:
+1. Access application at `http://<EC2_PUBLIC_IP>`
+2. Review [README.md](README.md) for vulnerability details
+3. Study [ATTACK_SCENARIOS.md](ATTACK_SCENARIOS.md) for exploitation
+4. Practice security testing
+5. **Destroy infrastructure** when complete: `cd terraform && terraform destroy`
